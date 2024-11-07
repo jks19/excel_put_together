@@ -167,3 +167,5 @@ cython_debug/
 완료/
 취합/
 *.whl
+*.exe
+*.zip

@@ -33,3 +33,7 @@ git config user.email "j.ks010919@gmail.com"
 git config --global user.name "김가나"
 git config --global user.email "helloWorld@java.com"
 
+
+[exe]
+(최종) pyinstaller -w --onefile 엑셀취합프로그램(동일위치).py
+(console: 디버깅용) pyinstaller --onefile --console 엑셀취합프로그램(동일위치).py
