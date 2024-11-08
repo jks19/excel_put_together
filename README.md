@@ -1,6 +1,7 @@
 # excel_put_together
-
 엑셀 취합프로그램(동일위치)
+
+py 3.11.4
 
 [venv]
 py -3.11 -m venv venv
