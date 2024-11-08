@@ -26,13 +26,11 @@ git config --unset --global user.email
 git config --list
 
 3. 재설정
-git config user.name "iSpr"
-git config user.email "iSpr1105@gmail.com"
-git config user.name "jks19"
-git config user.email "j.ks010919@gmail.com"
+git config user.name "nickname"
+git config user.email "helloWorld@gmail.com"
 만약 global로 하려면,
-git config --global user.name "김가나"
-git config --global user.email "helloWorld@java.com"
+git config --global user.name "nickname"
+git config --global user.email "helloWorld@gmail.com"
 
 
 [exe]
