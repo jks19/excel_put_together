@@ -494,6 +494,7 @@ class ExcelConsolidator:
             for sheet_name in template_sheet_names:
                 template_df = pd.read_excel(result_file, header=header_row, sheet_name=sheet_name)
                 template_cols[sheet_name] = set(template_df.columns)
+                offset_cnt = len(template_df)
             del template_df
 
         except Exception as e:
@@ -571,6 +572,7 @@ class ExcelConsolidator:
             # 취합을 위해 result_dfs(dict)에 저장
             for d in changes_list:
                 for k, v in d.items():
+                    v = v.iloc[offset_cnt:, :]   # 양식의 예시 행 있다면 제거
                     result_dfs[k].append(v)
 
             # result_dfs(dict) 순회하면서 concat하여 저장하기
