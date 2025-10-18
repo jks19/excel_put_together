@@ -3,6 +3,8 @@
 엑셀 취합프로그램(동일위치) v1.0.0      py 3.11
 엑셀 취합프로그램(동일위치) v2.0.0      py 3.12.4
 
+py 3.11.4
+
 [venv]
 py -3.11 -m venv venv
 venv\Scripts\activate.bat
