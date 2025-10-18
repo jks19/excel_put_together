@@ -1,6 +1,7 @@
 # excel_put_together
 
-엑셀 취합프로그램(동일위치)
+엑셀 취합프로그램(동일위치) v1.0.0      py 3.11
+엑셀 취합프로그램(동일위치) v2.0.0      py 3.12.4
 
 [venv]
 py -3.11 -m venv venv
@@ -25,13 +26,13 @@ git config --unset --global user.email
 git config --list
 
 3. 재설정
-git config user.name "iSpr"
-git config user.email "iSpr1105@gmail.com"
-git config user.name "jks19"
-git config user.email "j.ks010919@gmail.com"
+git config user.name "김가나"
+git config user.email "helloWorld@xxxxx.xxx"
+git config user.name "김가나"
+git config user.email "helloWorld@xxxxx.xxx"
 만약 global로 하려면,
 git config --global user.name "김가나"
-git config --global user.email "helloWorld@java.com"
+git config --global user.email "helloWorld@xxxxx.xxx"
 
 
 [exe]
