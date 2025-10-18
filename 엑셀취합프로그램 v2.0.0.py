@@ -2,6 +2,10 @@ import xlwings as xw
 import os
 import shutil
 import sys
+import re
+import pickle
+from collections import defaultdict
+import pandas as pd
 
 class ExcelConsolidator:
     def __init__(self):
@@ -15,22 +19,42 @@ class ExcelConsolidator:
 
         # 기본 경로
         self.base_path = base_path
-        self.template_path = os.path.join(base_path, "template")
-        self.input_folder = os.path.join(base_path, "input")
-        self.output_folder = os.path.join(base_path, "output")
-        
+        self.template_path = os.path.join(base_path, "양식")
+        self.input_folder = os.path.join(base_path, "취합")
+        self.output_folder = os.path.join(base_path, "결과")
+        self.state_file = os.path.join(base_path, "결과", "consolidation_state.pkl")
+
         # 추가 생성 가능 폴더 경로
         self.processed_folder = os.path.join(self.input_folder, "_처리완료")
         self.conflict_folder = os.path.join(self.input_folder, "_오류", "충돌")
         self.error_subfolder = os.path.join(self.input_folder, "_오류", "처리오류")
         self.error_folder = os.path.join(self.input_folder, "_오류")
-
+        # 공통 옵션 / # 
+        self.file_type = ('.xlsx', '.xls', '.xlsm')
         self.blue_color = (0, 112, 192)
-        self.changed_cells = {}  # {sheet_name: set(coords)}
+        self.changed_cells = defaultdict(dict)  # {sheet_name: {coord: {'filename': str, 'value': any}}}
         self.conflict_files = []
         self.error_files = []
         self.processed_files = []
-        
+
+    def load_state(self):
+        """이전 취합 상태 로드"""
+        try:
+            with open(self.state_file, 'rb') as f:
+                self.changed_cells = pickle.load(f)
+            print(f"✓ 이전 상태 로드됨: {len(self.changed_cells)} 시트\n")
+        except Exception as e:
+            print(f"⚠️  상태 파일 로드 실패: {e}\n")
+
+    def save_state(self):
+        """현재 취합 상태 저장"""
+        try:
+            with open(self.state_file, 'wb') as f:
+                pickle.dump(self.changed_cells, f)
+            print(f"\n✓ 상태 저장 완료: {self.state_file}")
+        except Exception as e:
+            print(f"⚠️  상태 저장 실패: {e}")
+
     def create_directory_structure(self):
         """필요한 폴더 구조 생성 (오류 폴더 제외)"""
         os.makedirs(self.template_path, exist_ok=True)
@@ -39,9 +63,9 @@ class ExcelConsolidator:
         os.makedirs(os.path.join(self.input_folder, "_처리완료"), exist_ok=True)
         
         print("📁 작업 폴더 구조:")
-        print(f"  template: {self.template_path}")
-        print(f"  input: {self.input_folder}")
-        print(f"  output: {self.output_folder}\n")
+        print(f"  양식: {self.template_path}")
+        print(f"  취합: {self.input_folder}")
+        print(f"  결과: {self.output_folder}\n")
 
     def create_conflict_folders(self):
         """충돌 폴더 구조 생성 (충돌 발생 시에만)"""
@@ -56,11 +80,11 @@ class ExcelConsolidator:
         while True:
             template_files = [
                 f for f in os.listdir(self.template_path)
-                if f.endswith(('.xlsx', '.xls')) and not f.startswith('~')
+                if f.endswith(self.file_type) and not f.startswith('~')
             ]
             
             if not template_files:
-                print("❌ 오류: template 폴더에 양식 파일이 없습니다.")
+                print("❌ 오류: '양식' 폴더에 양식 파일이 없습니다.")
                 print(f"📍 경로: {self.template_path}")
                 print("    양식 파일(*.xlsx 또는 *.xls)을 위 폴더에 넣어주세요.\n")
                 
@@ -71,7 +95,7 @@ class ExcelConsolidator:
                 return os.path.join(self.template_path, template_files[0])
             
             # 2개 이상인 경우
-            print(f"⚠️  경고: template 폴더에 {len(template_files)}개의 파일이 있습니다.")
+            print(f"⚠️  경고: '양식' 폴더에 {len(template_files)}개의 파일이 있습니다.")
             print("    양식 파일은 1개만 있어야 합니다.\n")
             for i, f in enumerate(template_files, 1):
                 print(f"  {i}. {f}")
@@ -84,7 +108,7 @@ class ExcelConsolidator:
         while True:
             output_files = [
                 f for f in os.listdir(self.output_folder)
-                if f.endswith(('.xlsx', '.xls')) and not f.startswith('~')
+                if f.endswith(self.file_type) and not f.startswith('~')
             ]
             
             if not output_files:
@@ -100,7 +124,7 @@ class ExcelConsolidator:
                 return result_file
             
             # 2개 이상: 사용자에게 정리 요청
-            print(f"⚠️  경고: output 폴더에 {len(output_files)}개의 파일이 있습니다.")
+            print(f"⚠️  경고: '결과' 폴더에 {len(output_files)}개의 파일이 있습니다.")
             print("    파일은 1개만 있어야 합니다.\n")
             for i, f in enumerate(output_files, 1):
                 print(f"  {i}. {f}")
@@ -116,49 +140,18 @@ class ExcelConsolidator:
         while True:
             input_files = [
                 f for f in os.listdir(self.input_folder)
-                if f.endswith(('.xlsx', '.xls')) and not f.startswith('~')
+                if f.endswith(self.file_type) and not f.startswith('~')
             ]
             
             if input_files:
                 return sorted(input_files)
             
             # 파일 없음
-            print("⚠️  input 폴더에 처리할 파일이 없습니다.")
+            print("⚠️  '취합' 폴더에 처리할 파일이 없습니다.")
             print(f"📍 경로: {self.input_folder}\n")
-            print("처리할 파일들을 input 폴더에 넣어주세요.")
+            print("처리할 파일들을 '취합' 폴더에 넣어주세요.")
             
             input("\n파일을 추가한 후 엔터를 눌러주세요: ")
-    
-    def build_changed_cells_from_result(self, template_wb, result_wb):
-        """
-        기존 결과 파일과 템플릿을 비교하여 changed_cells 구축
-        """
-        for sheet_name in [sheet.name for sheet in template_wb.sheets]:
-            try:
-                template_ws = template_wb.sheets[sheet_name]
-                result_ws = result_wb.sheets[sheet_name]
-                
-                all_coords = self.get_all_coords(template_ws, result_ws)
-                
-                for coord in all_coords:
-                    # 수식인 경우 제외 $ 잠금해제된 것만 하면 더 좋을 듯
-                    if self.is_formula(template_ws, coord):
-                        continue
-
-                    template_value = self.get_cell_value(template_ws, coord)
-                    result_value = self.get_cell_value(result_ws, coord)
-                    
-                    # 결과 파일이 템플릿과 다르면 변경된 것
-                    if template_value != result_value:
-                        if sheet_name not in self.changed_cells:
-                            self.changed_cells[sheet_name] = set()
-                        self.changed_cells[sheet_name].add(coord)
-            except Exception as e:
-                print(f"❌ 오류: 결과 파일 상태 복원 실패")
-                print(f"   시트: {sheet_name}")
-                print(f"   오류: {str(e)}")
-                print("\n프로그램을 종료합니다.")
-                sys.exit(1)
 
     def get_all_coords(self, ws1, ws2):
         """두 시트의 최대 행/열을 기준으로 모든 셀 좌표 반환"""
@@ -236,33 +229,34 @@ class ExcelConsolidator:
                 return coord
         return None
     
-    def record_changes(self, sheet_name, changes):
-        """변경된 셀 기록
+    def record_changes(self, sheet_name, changes, filename):
+        """변경된 셀 기록 (파일명 함께 저장)
         
         예시:
         - sheet_name: "Sheet1"
-        - changes.keys(): dict_keys(['A1', 'B2', 'C3'])
-        - self.changed_cells["Sheet1"] = {'A1', 'B2', 'C3'}
-        - update() 후: {'A1', 'B2', 'C3', 'D4'} (새 요소 추가)
+        - changes: {'A1': value1, 'B2': value2}
+        - filename: "답변_01.xlsx"
+        - self.changed_cells["Sheet1"] = {
+            'A1': {'filename': '답변_01.xlsx', 'value': value1},
+            'B2': {'filename': '답변_01.xlsx', 'value': value2}
+          }
         """
-        if sheet_name not in self.changed_cells:
-            self.changed_cells[sheet_name] = set()
-        
-        self.changed_cells[sheet_name].update(changes.keys())
+        for coord, value in changes.items():
+            self.changed_cells[sheet_name][coord] = {
+                'filename': filename,
+                'value': value
+            }
     
-    def open_folder(self, folder_path):
-        """폴더 열기"""
-        try:
-            if sys.platform == 'win32':
-                os.startfile(folder_path)
-            elif sys.platform == 'darwin':
-                os.system(f'open "{folder_path}"')
+    def input_excel_cell(self):
+        pattern = r'^[A-Za-z]+[1-9][0-9]*$'
+        while True:
+            user_input = input('첫번째 칼럼 셀 위치를 입력하세요.(예: A4): ')
+            if re.match(pattern, user_input):
+                return user_input
             else:
-                os.system(f'xdg-open "{folder_path}"')
-        except Exception as e:
-            print(f"폴더 열기 실패: {e}")
-    
-    def consolidate(self):
+                print('잘못된 형식입니다. 예) A4, B12 형식으로 입력해 주세요.')
+
+    def append_to_template_position(self):
         """모든 파일 취합 시작"""
         # 폴더 생성
         self.create_directory_structure()
@@ -279,23 +273,23 @@ class ExcelConsolidator:
         try:
             template_wb = xw.Book(template_file, visible=False)
         except Exception as e:
-            print(f"❌ 템플릿 파일 열기 실패: {e}")
+            print(f"❌ 양식 파일 열기 실패: {e}")
             return
         
         # 결과 파일 생성/로드
-        if os.path.exists(result_file):
+        if os.path.exists(result_file) and os.path.exists(self.state_file):
             # 기존 파일: 상태 복원
             try:
-                result_wb = xw.Book(result_file)
-                self.build_changed_cells_from_result(template_wb, result_wb)
+                result_wb = xw.Book(result_file, visible=True)
+                self.load_state()
             except Exception as e:
-                print(f"❌ 결과 파일 열기 실패: {e}")
+                print(f"❌ 기존 결과 파일 열기 실패: {e}")
                 return
         else:
             # 새 파일: 템플릿 복사
             shutil.copy(template_file, result_file)
             try:
-                result_wb = xw.Book(result_file)
+                result_wb = xw.Book(result_file, visible=True)
             except Exception as e:
                 print(f"❌ 결과 파일 생성 실패: {e}")
                 return
@@ -307,18 +301,20 @@ class ExcelConsolidator:
         
         processed_count = 0
         error_count = 0
-        
+        error_msgs = []
+
         for idx, filename in enumerate(input_files, 1):
             file_path = os.path.join(self.input_folder, filename)
             
             try:
-                current_wb = xw.Book(file_path)
+                current_wb = xw.Book(file_path, visible=True)
                 
                 # 1단계: 모든 시트 검증 및 변경사항 추출
                 changes_by_sheet = {}
                 file_has_error = False
                 error_sheet = None
                 error_coord = None
+                error_origin_file = None
 
                 current_sheet_names = [sheet.name for sheet in current_wb.sheets]
                 # if set(template_sheet_names) != set(current_sheet_names):
@@ -349,17 +345,22 @@ class ExcelConsolidator:
                                     file_has_error = True
                                     error_sheet = sheet_name
                                     error_coord = conflict_coord
+                                    error_origin_file = self.changed_cells[sheet_name][error_coord]['filename']
                                     break
                                 
                                 changes_by_sheet[sheet_name] = changes
                         
                         except KeyError:
-                            print(f"[ERROR] {filename} - 시트 '{sheet_name}' 없음")
+                            err_msg = f"[ERROR] {filename} - 시트 '{sheet_name}' 없음"
+                            print(err_msg)
+                            error_msgs.append(err_msg)
                             file_has_error = True
                             error_sheet = sheet_name
                             break
                         except Exception as e:
-                            print(f"[ERROR] {filename} 처리 중 오류: {str(e)}")
+                            err_msg = f"[ERROR] {filename} 처리 중 오류: {str(e)}"
+                            print(err_msg)
+                            error_msgs.append(err_msg)
                             file_has_error = True
                             break
                     
@@ -367,29 +368,59 @@ class ExcelConsolidator:
                 
                 # 2단계: 에러 있으면 파일만 이동
                 if file_has_error:
-                    print(f"\n⚠️  [충돌/오류 감지] {filename}")
+                    err_msg = f"\n⚠️  [충돌/오류 감지] {filename}"
+                    print(err_msg)
+                    error_msgs.append(err_msg)
                     if error_sheet:
                         self.create_conflict_folders()
                         shutil.move(file_path, os.path.join(self.conflict_folder, filename))
                         self.conflict_files.append(filename)
 
                         if error_coord:
-                            print(f"   시트: {error_sheet}, 충돌 셀: {error_coord}")
+                            err_msg = f"   시트: {error_sheet}, 충돌 셀: {error_coord}, 충돌 파일: {error_origin_file}"
+                            print(err_msg)
+                            error_msgs.append(err_msg)
+                            shutil.move(os.path.join(self.processed_folder, error_origin_file), os.path.join(self.conflict_folder, error_origin_file))
+                            # 원본 파일에서 변경됐던 셀들을 template 상태로 되돌리기
+                            print(f"   원본 파일의 변경사항을 되돌리고 있습니다...")
+                            for sheet_name_key in self.changed_cells:
+                                coords_to_revert = []
+                                for coord, info in self.changed_cells[sheet_name_key].items():
+                                    if info['filename'] == error_origin_file:
+                                        coords_to_revert.append(coord)
+                                
+                                if coords_to_revert:
+                                    result_ws = result_wb.sheets[sheet_name_key]
+                                    template_ws = template_wb.sheets[sheet_name_key]
+                                    
+                                    for coord in coords_to_revert:
+                                        template_value = self.get_cell_value(template_ws, coord)
+                                        self.set_cell_value(result_ws, coord, template_value)
+                                        # 파란색 제거 (template 상태로 원상복구)
+                                        self.set_cell_color(result_ws, coord, template_ws.range(coord).color)
+                                        
+                                        # changed_cells에서도 제거
+                                        del self.changed_cells[sheet_name_key][coord]
+                            processed_count -= 1
+
+                            print(f"   ✓ 원본 파일의 변경사항 복원 완료")
                         else:
-                            print(f"   시트: {error_sheet}")
+                            err_msg = f"   시트: {error_sheet}"
+                            print(err_msg)
+                            error_msgs.append(err_msg)
                     else:
                         self.create_error_subfolders()
                         shutil.move(file_path, os.path.join(self.error_subfolder, filename))
                         self.error_files.append(filename)
 
-                    print(f"   → 파일 제외\n")
+                    print("   → 파일 제외\n")
                     error_count += 1
                 else:
                     # 3단계: 에러 없으면 모든 변경사항 적용
                     for sheet_name, changes in changes_by_sheet.items():
                         result_ws = result_wb.sheets[sheet_name]
                         self.apply_changes_to_template(result_ws, changes)
-                        self.record_changes(sheet_name, changes)
+                        self.record_changes(sheet_name, changes, filename)
                     
                     processed_file_path = os.path.join(self.processed_folder, filename)
                     shutil.move(file_path, processed_file_path)
@@ -398,7 +429,10 @@ class ExcelConsolidator:
                     processed_count += 1
                 
             except Exception as e:
-                print(f"[ERROR] {filename} 처리 중 심각한 오류: {str(e)}")
+                err_msg = f"[ERROR] {filename} 처리 중 심각한 오류: {str(e)}\n"
+                print(err_msg)
+                print("   → 파일 제외\n")
+                error_msgs.append(err_msg)
                 self.create_error_folders()
                 shutil.move(file_path, os.path.join(self.error_subfolder, filename))
                 self.error_files.append(filename)
@@ -411,6 +445,9 @@ class ExcelConsolidator:
             template_wb.close()
         except Exception as e:
             print(f"파일 저장 중 오류: {e}")
+
+        # 상태 저장
+        self.save_state()
         
         # 완료 보고
         print("\n" + "="*60)
@@ -422,18 +459,166 @@ class ExcelConsolidator:
         
         # 에러 폴더 열기 (1건 이상)
         if error_count > 0:
-            print(f"\n❌ 오류 발생 파일 ({error_count}개)")
-            print(f"📁 오류 파일을 확인하세요.")
-            self.open_folder(self.error_folder)
+            print(f"\n❌ 오류 발생 파일 ({error_count}개) 내역 요약")
+            print(f'{'\n'.join(error_msgs)}')
+            print(f"📁 오류 파일을 확인하고 수정하여 '취합' 폴더에 다시 넣고 재실행하세요.")
+            os.startfile(self.error_folder)
         else:
             # 성공 시 결과 파일 열기
             print(f"\n✅ 모든 파일이 안전하게 처리되었습니다!")
-            print(f"\n📁 결과 파일을 열고 있습니다...\n")
-            self.open_folder(os.path.dirname(result_file))
+            print(f"\n📄 결과 파일을 열고 있습니다...\n")
+            os.startfile(os.path.dirname(result_file))
+
+    def concat_files(self):     # $$ 미확인
+        """모든 파일 취합 시작"""
+        # 폴더 생성
+        self.create_directory_structure()
+        
+        # 템플릿 확인
+        template_file = self.check_template_file()
+
+        # 결과 파일 확인 (경로 반환, 없으면 새 경로)
+        result_file = self.check_output_files()
+        
+        # 입력 파일 확인
+        input_files = self.check_input_files()
+
+        start_cell = self.input_excel_cell()
+
+        header_row = int(re.search(r'\\d+', start_cell).group())
+        try:
+            template_wb = xw.Book(template_file, visible=False)
+            template_sheet_names = [sheet.name for sheet in template_wb.sheets]
+            template_wb.close()
+            template_cols = {}
+            for sheet_name in template_sheet_names:
+                template_df = pd.read_excel(result_file, header=header_row, sheet_name=sheet_name)
+                template_cols[sheet_name] = set(template_df.columns)
+            del template_df
+
+        except Exception as e:
+            print(f"❌ 양식 파일 열기 실패: {e}")
+            return
+
+        # 새 파일: 템플릿 복사
+        shutil.copy(template_file, result_file)
+        try:
+            result_wb = xw.Book(result_file, visible=True)
+        except Exception as e:
+            print(f"❌ 결과 파일 생성 실패: {e}")
+            return
+        
+        
+        
+        # 입력 파일 가져오기
+        print(f"총 {len(input_files)}개 파일 처리 시작...")
+        
+        processed_count = 0
+        error_count = 0
+        error_msgs = []
+
+
+        result_dfs = defaultdict(list)
+        changes_list = []
+        for idx, filename in enumerate(input_files, 1):
+            file_path = os.path.join(self.input_folder, filename)
+
+            try:
+                file_has_error = False
+
+                changes = {}
+                for sheet_name in template_sheet_names:
+                    current_ws = pd.read_excel(file_path, header=header_row, sheet_name=sheet_name)
+                    if template_cols[sheet_name] != set(current_ws.columns):
+                        ## 에러 처리
+                        error_sheet_name = sheet_name
+                        file_has_error = True
+                        break
+                    else:
+                        current_ws.loc[:, '출처 파일명'] = filename
+                        changes[sheet_name] = current_ws
+
+                if file_has_error:
+                    self.create_error_subfolders()
+                    shutil.move(file_path, os.path.join(self.error_subfolder, filename))
+                    self.error_files.append(filename)
+                    
+                    err_msg = f"\n⚠️  [충돌/오류 감지] {filename}\n   칼럼명이 불일치 합니다.\n   시트: {error_sheet_name}, 칼럼: {list(current_ws.columns)}"
+                    error_msgs.append(err_msg)
+                    print("   → 파일 제외\n")
+                    error_count += 1
+
+                else:
+                    changes_list.append(changes)
+                    processed_file_path = os.path.join(self.processed_folder, filename)
+                    shutil.move(file_path, processed_file_path)
+                    self.processed_files.append(filename)
+                    print(f"[{idx}/{len(input_files)}] {filename} - 처리 완료 ✓")
+                    processed_count += 1
+
+            except Exception as e:
+                err_msg = f"[ERROR] {filename} 처리 중 심각한 오류: {str(e)}\n"
+                print(err_msg)
+                print("   → 파일 제외\n")
+                error_msgs.append(err_msg)
+                self.create_error_folders()
+                shutil.move(file_path, os.path.join(self.error_subfolder, filename))
+                self.error_files.append(filename)
+                error_count += 1
+
+        # 저장 및 닫기
+        try:
+            # 취합을 위해 result_dfs(dict)에 저장
+            for d in changes_list:
+                for k, v in d.items():
+                    result_dfs[k].append(v)
+
+            # result_dfs(dict) 순회하면서 concat하여 저장하기
+            for sheet_name in template_sheet_names:
+                result_ws = result_wb.sheets[sheet_name]
+
+                start_cell = result_ws.range(start_cell)
+                insert_cell = start_cell.offset(1, 0)   # 바로 아래 셀 위치로 이동 (행: +1, 열: 0)
+
+                ws_concat_df = pd.concat(result_dfs[sheet_name], axis=0)    # DataFrame 값만 삽입 (헤더 없이)
+                ws_concat_df = ws_concat_df.drop_duplicates()
+                insert_cell.options(index=False, header=False).value = ws_concat_df
+
+            result_wb.save()
+            result_wb.close()
+
+        except Exception as e:
+            print(f"파일 저장 중 오류: {e}")
+
+        # 완료 보고
+        print("\n" + "="*60)
+        print(f"취합 완료!")
+        print(f"처리된 파일: {processed_count}개")
+        # print(f"오류 파일: {error_count}개")
+        print(f"\n📄 결과 파일: {result_file}")
+        print("="*60)
+        
+        # 에러 폴더 열기 (1건 이상)
+        if error_count > 0:
+            print(f"\n❌ 오류 발생 파일 ({error_count}개) 내역 요약")
+            print(f'{'\n'.join(error_msgs)}')
+            print(f"📁 오류 파일을 확인하고 수정하여 '취합' 폴더에 다시 넣고 재실행하세요.")
+            os.startfile(self.error_folder)
+        else:
+            # 성공 시 결과 파일 열기
+            print(f"\n✅ 모든 파일이 안전하게 처리되었습니다!")
+            print(f"\n📄 결과 파일을 열고 있습니다...\n")
+            os.startfile(os.path.dirname(result_file))
 
 
 # 사용 예제
 if __name__ == "__main__":
     consolidator = ExcelConsolidator()
-    consolidator.consolidate()
+    consolidator.append_to_template_position()
     input('종료하려면 아무키나 누르세요.')
+
+
+
+
+
+

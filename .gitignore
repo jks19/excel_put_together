@@ -164,11 +164,8 @@ cython_debug/
 
 검토/
 양식/
-완료/
+결과/
 취합/
 *.whl
 *.exe
 *.zip
-input/
-output/
-template/
