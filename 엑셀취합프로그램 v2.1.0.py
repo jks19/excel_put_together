@@ -8,7 +8,7 @@ from collections import defaultdict
 import pandas as pd
 
 class ExcelConsolidator:
-    def __init__(self):
+    def __init__(self, app):
         if getattr(sys, 'frozen', False):
             # 패키징된 exe 실행 환경
             base_path = os.path.dirname(sys.executable)
@@ -16,6 +16,7 @@ class ExcelConsolidator:
             # 일반 파이썬 스크립트 실행 환경
             base_path = os.path.dirname(os.path.abspath(__file__))
 
+        self.app = app
 
         # 기본 경로
         self.base_path = base_path
@@ -31,7 +32,7 @@ class ExcelConsolidator:
         self.error_folder = os.path.join(self.input_folder, "_오류")
         # 공통 옵션 / # 
         self.file_type = ('.xlsx', '.xls', '.xlsm')
-        self.blue_color = (0, 112, 192)
+        self.blue_color = (0, 176, 240)
         self.changed_cells = defaultdict(dict)  # {sheet_name: {coord: {'filename': str, 'value': any}}}
         self.conflict_files = []
         self.error_files = []
@@ -239,7 +240,7 @@ class ExcelConsolidator:
         - self.changed_cells["Sheet1"] = {
             'A1': {'filename': '답변_01.xlsx', 'value': value1},
             'B2': {'filename': '답변_01.xlsx', 'value': value2}
-          }
+            }
         """
         for coord, value in changes.items():
             self.changed_cells[sheet_name][coord] = {
@@ -271,7 +272,8 @@ class ExcelConsolidator:
         input_files = self.check_input_files()
         
         try:
-            template_wb = xw.Book(template_file, visible=False)
+            template_wb = self.app.books.open(template_file)
+
         except Exception as e:
             print(f"❌ 양식 파일 열기 실패: {e}")
             return
@@ -280,7 +282,7 @@ class ExcelConsolidator:
         if os.path.exists(result_file) and os.path.exists(self.state_file):
             # 기존 파일: 상태 복원
             try:
-                result_wb = xw.Book(result_file, visible=True)
+                result_wb = self.app.books.open(result_file)
                 self.load_state()
             except Exception as e:
                 print(f"❌ 기존 결과 파일 열기 실패: {e}")
@@ -289,13 +291,22 @@ class ExcelConsolidator:
             # 새 파일: 템플릿 복사
             shutil.copy(template_file, result_file)
             try:
-                result_wb = xw.Book(result_file, visible=True)
+                result_wb = self.app.books.open(result_file)
             except Exception as e:
                 print(f"❌ 결과 파일 생성 실패: {e}")
                 return
-        
+
+        # 결과 파일에 시트 및 통합문서 보호 설정 해제
+        wb_pw = input('통합문서 보호 암호를 입력하세요. 없으면 엔터를 누르세요.')
+        ws_pw = input('워크시트 보호 암호를 입력하세요. 없으면 엔터를 누르세요.')
+        result_wb.api.Unprotect(Password=f'{wb_pw}')
+
         template_sheet_names = [sheet.name for sheet in template_wb.sheets]
-        
+
+        for sheet_name in template_sheet_names:
+            result_ws = result_wb.sheets[sheet_name]
+            result_ws.api.Unprotect(Password=f'{ws_pw}')
+
         # 입력 파일 가져오기
         print(f"총 {len(input_files)}개 파일 처리 시작...")
         
@@ -307,7 +318,7 @@ class ExcelConsolidator:
             file_path = os.path.join(self.input_folder, filename)
             
             try:
-                current_wb = xw.Book(file_path, visible=True)
+                current_wb = self.app.books.open(file_path)
                 
                 # 1단계: 모든 시트 검증 및 변경사항 추출
                 changes_by_sheet = {}
@@ -487,7 +498,7 @@ class ExcelConsolidator:
 
         header_row = int(re.search(r'\\d+', start_cell).group())
         try:
-            template_wb = xw.Book(template_file, visible=False)
+            template_wb = self.app.books.open(template_file)
             template_sheet_names = [sheet.name for sheet in template_wb.sheets]
             template_wb.close()
             template_cols = {}
@@ -504,7 +515,7 @@ class ExcelConsolidator:
         # 새 파일: 템플릿 복사
         shutil.copy(template_file, result_file)
         try:
-            result_wb = xw.Book(result_file, visible=True)
+            result_wb = self.app.books.open(result_file)
         except Exception as e:
             print(f"❌ 결과 파일 생성 실패: {e}")
             return
@@ -517,7 +528,6 @@ class ExcelConsolidator:
         processed_count = 0
         error_count = 0
         error_msgs = []
-
 
         result_dfs = defaultdict(list)
         changes_list = []
@@ -609,18 +619,19 @@ class ExcelConsolidator:
         else:
             # 성공 시 결과 파일 열기
             print(f"\n✅ 모든 파일이 안전하게 처리되었습니다!")
-            print(f"\n📄 결과 파일을 열고 있습니다...\n")
+            print(f"\n📄 결과 파일 폴더를 열고 있습니다...\n")
             os.startfile(os.path.dirname(result_file))
-
 
 # 사용 예제
 if __name__ == "__main__":
-    consolidator = ExcelConsolidator()
-    consolidator.append_to_template_position()
-    input('종료하려면 아무키나 누르세요.')
 
+    # app = xw.App(visible=True)     # 작업용: 엑셀 창 실시간으로 보면서 확인 가능
+    app = xw.App(visible=False)
 
-
-
-
+    try:
+        consolidator = ExcelConsolidator(app)
+        consolidator.append_to_template_position()
+        input('종료하려면 아무키나 누르세요.')
+    finally:
+        app.quit()
 
