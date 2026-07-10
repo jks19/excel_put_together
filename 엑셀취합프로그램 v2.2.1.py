@@ -240,7 +240,7 @@ class ExcelConsolidator:
         - self.changed_cells["Sheet1"] = {
             'A1': {'filename': '답변_01.xlsx', 'value': value1},
             'B2': {'filename': '답변_01.xlsx', 'value': value2}
-            }
+          }
         """
         for coord, value in changes.items():
             self.changed_cells[sheet_name][coord] = {
@@ -315,8 +315,14 @@ class ExcelConsolidator:
         error_msgs = []
 
         for idx, filename in enumerate(input_files, 1):
-            file_path = os.path.join(self.input_folder, filename)
+            # 취합하려는 파일명이 양식 파일과 동일한 경우 자동으로 취합파일명 수정하고 진행하기(맨 뒤에 _ 붙여서)
+            if filename == template_file.split('\\')[-1]:
+                name, ext = os.path.splitext(filename)  # 이름과 확장자 분리
+                os.rename(os.path.join(self.input_folder, filename), os.path.join(self.input_folder, f'{name}_임시복제본{ext}'))
+                filename = f'{name}_임시복제본{ext}'
             
+            file_path = os.path.join(self.input_folder, filename)
+
             try:
                 current_wb = self.app.books.open(file_path)
                 
@@ -444,7 +450,7 @@ class ExcelConsolidator:
                 print(err_msg)
                 print("   → 파일 제외\n")
                 error_msgs.append(err_msg)
-                self.create_error_folders()
+                self.create_error_subfolders()
                 shutil.move(file_path, os.path.join(self.error_subfolder, filename))
                 self.error_files.append(filename)
                 error_count += 1
@@ -456,6 +462,7 @@ class ExcelConsolidator:
             template_wb.close()
         except Exception as e:
             print(f"파일 저장 중 오류: {e}")
+            input('종료하려면 아무키나 누르세요.')
 
         # 상태 저장
         self.save_state()
@@ -529,6 +536,7 @@ class ExcelConsolidator:
         error_count = 0
         error_msgs = []
 
+
         result_dfs = defaultdict(list)
         changes_list = []
         for idx, filename in enumerate(input_files, 1):
@@ -572,7 +580,7 @@ class ExcelConsolidator:
                 print(err_msg)
                 print("   → 파일 제외\n")
                 error_msgs.append(err_msg)
-                self.create_error_folders()
+                self.create_error_subfolders()
                 shutil.move(file_path, os.path.join(self.error_subfolder, filename))
                 self.error_files.append(filename)
                 error_count += 1
@@ -601,6 +609,7 @@ class ExcelConsolidator:
 
         except Exception as e:
             print(f"파일 저장 중 오류: {e}")
+            input('종료하려면 아무키나 누르세요.')
 
         # 완료 보고
         print("\n" + "="*60)
@@ -622,6 +631,7 @@ class ExcelConsolidator:
             print(f"\n📄 결과 파일 폴더를 열고 있습니다...\n")
             os.startfile(os.path.dirname(result_file))
 
+
 # 사용 예제
 if __name__ == "__main__":
 
@@ -634,4 +644,3 @@ if __name__ == "__main__":
         input('종료하려면 아무키나 누르세요.')
     finally:
         app.quit()
-
